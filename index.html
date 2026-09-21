@@ -457,44 +457,51 @@ function stopPhoneOrientation() {
   phoneOrientationActive = false;
 }
 
+/* 手机姿态 → 相机 yaw/pitch
+   取"手机背面(-Z 轴)朝向的方向向量"，再换算成 yaw/pitch。
+   这个方向与屏幕是横屏还是竖屏无关，所以横屏(左/右)、竖屏都正确。
+   W3C 姿态矩阵 R = Rz(α)·Rx(β)·Ry(γ)，背面方向 = R·(0,0,-1)，
+   坐标 E=东 N=北 U=上：
+     yaw   = atan2(E, N)   （向右转为正，与 HID/相机约定一致）
+     pitch = asin(U)       （向上看为正） */
 function handleOrientation(event) {
   if (orientationMode !== 'phone') return;
   if (event.alpha === null || event.beta === null || event.gamma === null) return;
 
-  const alpha = event.alpha || 0;
-  const beta  = event.beta  || 0;
-  const gamma = event.gamma || 0;
+  const D = Math.PI / 180;
+  const a = (event.alpha || 0) * D;
+  const b = (event.beta  || 0) * D;
+  const g = (event.gamma || 0) * D;
+  const sa = Math.sin(a), ca = Math.cos(a);
+  const sb = Math.sin(b), cb = Math.cos(b);
+  const sg = Math.sin(g), cg = Math.cos(g);
 
-  const [smoothAlpha, , smoothGamma] = smoother.smoothOrientation(alpha, beta, gamma, 0, 0, 0);
+  const E = -(cg * sa * sb + ca * sg);
+  const N =   ca * cg * sb - sa * sg;
+  const U = -(cb * cg);
 
-  let heading = 0;
-  if (typeof event.webkitCompassHeading === 'number') heading = event.webkitCompassHeading;
-  else if (typeof smoothAlpha === 'number')           heading = 180 - smoothAlpha;
+  const yaw   = Math.atan2(E, N) / D;
+  const pitch = Math.asin(THREE.MathUtils.clamp(U, -1, 1)) / D;
 
-  applyPhoneOrientation(heading, smoothGamma);
+  applyPhoneOrientation(yaw, pitch);
 }
 
-function applyPhoneOrientation(heading, rawBeta) {
-  if (heading == null || rawBeta == null || isNaN(heading) || isNaN(rawBeta)) return;
+// headingOffset / pitchBase：Center 时记下的"正前方"，首帧自动取当前朝向
+function applyPhoneOrientation(yaw, pitch) {
+  if (yaw == null || pitch == null || isNaN(yaw) || isNaN(pitch)) return;
 
-  lastHeading = heading;
-  lastRawBeta = rawBeta;
+  lastHeading = yaw;     // 供 Center 使用
+  lastRawBeta = pitch;
 
-  if (headingOffset === null) headingOffset = heading;
-  if (pitchBase === null)     pitchBase     = rawBeta;
+  if (headingOffset === null) headingOffset = yaw;
+  if (pitchBase === null)     pitchBase     = pitch;
 
-  const relativeYaw   = heading - headingOffset;
-  const relativePitch = rawBeta - pitchBase;
+  // yaw 归一到 ±180 后，再与上一帧"展开"，避免跨 ±180° 时画面倒着转一整圈
+  const relYaw = wrapAngle(yaw - headingOffset, -180, 180);
+  const d = wrapAngle(relYaw - targetYaw, -180, 180);
 
-  const mappedYaw   = relativePitch;
-  const mappedPitch = -relativeYaw;
-  const pitchCorrection = -90;
-
-  targetYaw   = wrapAngle(mappedYaw - 90, -180, 180);
-  targetPitch = wrapAngle(90 - mappedPitch + pitchCorrection, 0, 360);
-
-  targetYaw   = THREE.MathUtils.clamp(targetYaw,   -180, 0);
-  targetPitch = THREE.MathUtils.clamp(targetPitch,   90, 270);
+  targetYaw   = targetYaw + d;
+  targetPitch = THREE.MathUtils.clamp(pitch - pitchBase, -90, 90);
 
   message.innerText = `[Phone] Yaw ${targetYaw.toFixed(1)}° / Pitch ${targetPitch.toFixed(1)}°`;
 }
