@@ -1,682 +1,780 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>180 SBS VR Viewer - Fixed</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  
-  <style>
+<meta charset="UTF-8" />
+<title>180 SBS VR Viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; overflow: hidden; background: #000; font-family: -apple-system, "Segoe UI", sans-serif; }
+  canvas { display: block; }
 
-    body { margin: 0; overflow: hidden; background: black; font-family: sans-serif; }
-    canvas { display: block; }
-    #controls {
-      position: absolute;
-      top: 0; left: 0; width: 100%;
-      padding: 10px;
-      z-index: 100;
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
-      background: rgba(0, 0, 0, 0.6);
-    }
-    input[type="file"], input[type="range"], button {
-      padding: 6px 12px;
-      font-size: 1em;
-      border-radius: 4px;
-      border: none;
-	  font-weight: bold;
-    color: white;
-	   text-shadow: 2px 2px 3px rgba(250, 250, 250, 0.7);
-    }
-	label{
-	font-weight: bold;
-    color: white;
-	 text-shadow: 2px 2px 3px rgba(250, 250, 250, 0.7);
-	}
-    button {
-      background: #007acc;
-      color: white;
-      cursor: pointer;
-    }
-	.group{
-		display: flex;
-		flex-direction: column;
-		gap: 2vw;
-		width: 20vw;
-	}
-    #message{
-      position: absolute;
-      bottom: 15px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: white;
-      background: rgba(0, 0, 0, 0.6);
-      padding: 8px 16px;
-      border-radius: 6px;
-      z-index: 50;
-    }
-	#pmessage {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: white;
-      background: rgba(0, 0, 0, 0.8);
-      padding: 20px 40px;
-      border-radius: 10px;
-      font-size: 24px;
-      text-align: center;
-      z-index: 1000;
-    }
-	#landscapeScreen {
-	  display: none;
-	}
-	#portraitScreen {
-	  display: block;
-	}
-	@media screen and (orientation: landscape) {
-	  #landscapeScreen {
-		display: block;
-	  }
-	 #portraitScreen {
-		display: none;
-	  }
-	}
-	@media screen and (max-aspect-ratio: 1/1) {
-	  #landscapeScreen { display: none; }
-	  #portraitScreen { display: block; }
-	}
-	/* 横屏：宽度大于高度 */
-	@media screen and (min-aspect-ratio: 1/1) {
-	  #landscapeScreen { display: block; }
-	  #portraitScreen { display: none; }
-	}
-  </style>
+  #toolbar {
+    position: absolute; top: 0; left: 0; width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    flex-wrap: wrap; gap: 8px;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px);
+    z-index: 100;
+    font-size: 12px; color: #eee;
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  #toolbar.hidden { transform: translateY(-110%); opacity: 0; pointer-events: none; }
+
+  .tb-group {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+  }
+  .tb-group > label { font-size: 11px; opacity: .75; white-space: nowrap; }
+
+  button, input[type=file], input[type=text], input[type=range] {
+    font-family: inherit; font-size: 12px; color: #eee;
+    background: #1f1f1f; border: 1px solid #444;
+    border-radius: 4px; padding: 4px 8px;
+    cursor: pointer; line-height: 1.2;
+  }
+  button:hover:not(:disabled) { background: #2c2c2c; border-color: #666; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.active { background: #0a6; border-color: #0c8; color: #fff; }
+  input[type=text] { width: 64px; font-family: monospace; color: #7f7; background: #111; }
+  input[type=range] { padding: 0; height: 18px; width: 90px; background: transparent; border: none; cursor: pointer; }
+  input[type=file] { padding: 3px 6px; max-width: 150px; }
+
+  #message {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    color: #fff; background: rgba(0,0,0,0.65);
+    padding: 6px 14px; border-radius: 6px;
+    font-size: 12px; z-index: 50; white-space: nowrap;
+  }
+
+  #portraitScreen {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    color: #fff; background: #000; z-index: 1000;
+    font-size: 20px; text-align: center; line-height: 1.6;
+  }
+  @media (max-aspect-ratio: 1/1) { #portraitScreen { display: flex; } }
+
+  #video {
+    position: fixed; bottom: 16px; right: 16px;
+    width: 18vw; max-width: 260px;
+    border-radius: 6px; display: none;
+  }
+</style>
 </head>
 <body>
+
 <div id="camView">
-<div id = "landscapeScreen" >
-	<div id="controls">
-		<div class="group" style="width:25vw">
-		<input type="file" accept="video/*" id="fileInput" />
-	</div>
-    <div class="group">
-        <label for="zoomSlider" >视角缩放</label>
-        <input type="range" id="zoomSlider" min="30" max="120" value="75" />
+  <div id="toolbar">
+    <div class="tb-group">
+      <label>Video</label>
+      <input type="file" accept="video/*" id="fileInput" />
     </div>
-    <div class="group">
-        <label for="splitSlider" >分割调节</label>
-        <input type="range" id="splitSlider" min="0.4" max="0.6" step="0.01" value="0.5" />
+
+    <div class="tb-group">
+      <label>FOV</label>
+      <input type="range" id="zoomSlider" min="30" max="120" value="75" />
+      <label>Split</label>
+      <input type="range" id="splitSlider" min="0.4" max="0.6" step="0.01" value="0.5" />
+      <button id="centerBtn">⊙ Center</button>
+      <button id="resetBtn">↺ Reset</button>
     </div>
-	<div class="group" style="width:15vw">
-		<button id="fullscreenBtn">⛶ 全屏</button>
-	    <button id="centerBtn">⊙ 居中</button>
-	</div>
+
+    <div class="tb-group">
+      <label>View</label>
+      <button id="viewBoth" class="active">👓 Both</button>
+      <button id="viewLeft">👁 Left</button>
+      <button id="viewRight">👁 Right</button>
+    </div>
+
+    <div class="tb-group">
+      <label>Source</label>
+      <button id="modePhoneBtn">📱 Phone</button>
+      <button id="modeHidBtn" class="active">🕶 HID</button>
+    </div>
+
+    <div class="tb-group">
+      <input type="text" id="vid" placeholder="VID" />
+      <input type="text" id="pid" placeholder="PID" />
+      <button id="connectHid">Connect</button>
+      <button id="disconnectHid" disabled>Disconnect</button>
+    </div>
+
+    <div class="tb-group">
+      <button id="fullscreenBtn">⛶ Fullscreen</button>
+    </div>
   </div>
 
-  <div id="message">加载中...</div>
-  <video id="video" style="position: fixed; border-radius: 8px;margin:10px; width:20vw;bottom: 20px;right: 20px; display:none;" playsinline muted controls crossorigin="anonymous"></video>
+  <div id="message">Loading…</div>
+  <video id="video" playsinline muted controls crossorigin="anonymous"></video>
 </div>
-<div id = "portraitScreen">
-    <div id="pmessage">
-      📱 → 🖥️<br>
-      请将设备横屏使用<br>
-      <small style="font-size: 16px; opacity: 0.8;">Please rotate to landscape</small>
-    </div>
+
+<div id="portraitScreen">
+  📱 → 🖥️<br>
+  Please rotate your device to landscape
 </div>
-</div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script>
-    let renderer, sceneL, sceneR, cameraL, cameraR, texture;
-    const video = document.getElementById("video");
-    const zoomSlider = document.getElementById("zoomSlider");
-    const message = document.getElementById("message");
-    const fullscreenBtn = document.getElementById("fullscreenBtn");
-    const centerBtn = document.getElementById("centerBtn");
-    const splitSlider = document.getElementById("splitSlider");
-	const camView = document.getElementById("camView");
-	
-    let targetYaw = 0, targetPitch = 0;
-    let cameraYaw = 0, cameraPitch = 0;
-    let isMuted = true;
-    let headingOffset = null;
-    let pitchBase = null;
-    let previousRawPitch = null;
-	let splitRatio = 0.5; // 分割比例，0.5表示居中
-	let lastHeading = 0;
-	let lastRawBeta = 0;
-    let startY = 0;
-    let isDragging = false;
-    const threshold = 50; 
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ============================================================
+   1. 全局状态
+   ============================================================ */
+let renderer, sceneL, sceneR, cameraL, cameraR, texture;
 
-    init();
-    animate();
+const video          = document.getElementById("video");
+const zoomSlider     = document.getElementById("zoomSlider");
+const splitSlider    = document.getElementById("splitSlider");
+const message        = document.getElementById("message");
+const fullscreenBtn  = document.getElementById("fullscreenBtn");
+const centerBtn      = document.getElementById("centerBtn");
+const resetBtn       = document.getElementById("resetBtn");
+const camView        = document.getElementById("camView");
+const toolbar        = document.getElementById("toolbar");
+const modePhoneBtn   = document.getElementById("modePhoneBtn");
+const modeHidBtn     = document.getElementById("modeHidBtn");
+const viewBothBtn    = document.getElementById("viewBoth");
+const viewLeftBtn    = document.getElementById("viewLeft");
+const viewRightBtn   = document.getElementById("viewRight");
 
-    function init() {
-      renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setScissorTest(true);
-	  camView.appendChild(renderer.domElement);
+let targetYaw = 0, targetPitch = 0;
+let cameraYaw = 0, cameraPitch = 0;
+let splitRatio = 0.5;
+const DEFAULT_FOV = 75;
+const DEFAULT_SPLIT = 0.5;
 
-      sceneL = new THREE.Scene();
-      sceneR = new THREE.Scene();
+/* ---- 调试开关（方向不对时只需改这里）---- */
+const SWAP_EYES      = false; // 片源本身是"右眼在左半边"(交叉眼)时改为 true
+const HID_YAW_SIGN   = -1;    // 头往右转、画面却往右跑 → 改成 1
+const HID_PITCH_SIGN = 1;     // 抬头、画面却往上跑   → 改成 -1
 
-      const aspect = (window.innerWidth / 2) / window.innerHeight;
-      cameraL = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
-      cameraR = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+let displayMode = 'both';        // 'both' | 'left' | 'right'
+let orientationMode = 'hid';     // 默认 HID（你要的场景）
 
-      // 创建默认测试纹理 - 使用程序生成避免跨域问题
-      createDefaultTexture();
+/* ---- HID 状态 ---- */
+let hidDevice = null;
+let pitchDeg = 0, yawDeg = 0, rollDeg = 0;
+let lastSampleTime = null;
+let hidYawOffset = 0, hidPitchOffset = 0;
 
-      document.getElementById("fileInput").addEventListener("change", (e) => {
-        const file = e.target.files[0];
-        if (file) {
-          video.src = URL.createObjectURL(file);
-          video.load();
-          video.onloadeddata = () => {
-            // 修复视频纹理设置，禁用 mipmap 生成
-            texture = new THREE.VideoTexture(video);
-            texture.minFilter = THREE.LinearFilter;
-            texture.magFilter = THREE.LinearFilter;
-            texture.format = THREE.RGBFormat;
-            texture.generateMipmaps = false; // 关键修复：禁用 mipmap 生成
-            texture.flipY = true; // 修复：设置为true来正确显示视频
-            createScene(texture);
-            message.innerText = "点击播放开始观看";
-            showButtons();
-			centerBtn.onclick ();
-          };
-        }
-      });
+/* ---- 手机状态（保留，不参与 HID 计算） ---- */
+let headingOffset = null;
+let pitchBase = null;
+let lastHeading = 0;
+let lastRawBeta = 0;
+let phoneOrientationActive = false;
 
-      zoomSlider.addEventListener("input", () => {
-        const fov = parseFloat(zoomSlider.value);
-        cameraL.fov = cameraR.fov = fov;
-        cameraL.updateProjectionMatrix();
-        cameraR.updateProjectionMatrix();
-      });
-      splitSlider.addEventListener("input", () => {
-        splitRatio = parseFloat(splitSlider.value);
-      });
-	  
-	  
-	  
-	  
-	camView.addEventListener('mousedown', function(e) {
-        startY = e.clientY;
-        isDragging = true;
-        e.preventDefault(); // 防止文本选择
-    });
+let uiVisible = true;      // 点击主画面切换：工具栏 / 原生播放器 / 提示文字
+let videoLoaded = false;   // 还没载入视频时不显示原生播放器
 
-    camView.addEventListener('mousemove', function(e) {
-        if (!isDragging) return;
-        
-        const currentY = e.clientY;
-        const deltaY = currentY - startY;
-        
-        if (deltaY > threshold) {
-            landscapeScreen.style.display = 'block';
-            isDragging = false;
-        } else if (deltaY < -threshold) {
-            landscapeScreen.style.display = 'none';
-            isDragging = false;
-        }
-    });
+/* ============================================================
+   2. Quaternion 工具类
+   ============================================================ */
+class Quaternion {
+  constructor(w = 1, x = 0, y = 0, z = 0) { this.w = w; this.x = x; this.y = y; this.z = z; }
 
-    camView.addEventListener('mouseup', function() {
-        isDragging = false;
-    });
-	
-	camView.addEventListener('touchstart', function(e) {
-        startY = e.touches[0].clientY;
-        isDragging = true;
-    });
+  static fromEuler(alpha, beta, gamma) {
+    const a = alpha * Math.PI / 180 / 2;
+    const b = beta  * Math.PI / 180 / 2;
+    const g = gamma * Math.PI / 180 / 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const cb = Math.cos(b), sb = Math.sin(b);
+    const cg = Math.cos(g), sg = Math.sin(g);
+    return new Quaternion(
+      ca*cb*cg + sa*sb*sg,
+      sa*cb*cg - ca*sb*sg,
+      ca*sb*cg + sa*cb*sg,
+      ca*cb*sg - sa*sb*cg
+    );
+  }
 
-    camView.addEventListener('touchmove', function(e) {
-        if (!isDragging) return;
-        
-        const currentY = e.touches[0].clientY;
-        const deltaY = currentY - startY;
-        
-        // 向下滑动（显示）
-        if (deltaY > threshold) {
-            landscapeScreen.style.display = 'block';
-            isDragging = false;
-        } 
-        // 向上滑动（隐藏）
-        else if (deltaY < -threshold) {
-            landscapeScreen.style.display = 'none';
-            isDragging = false;
-        }
-    });
+  toEuler() {
+    const { w, x, y, z } = this;
+    let alpha = Math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z)) * 180/Math.PI;
+    const sinBeta = 2*(w*y - z*x);
+    let beta = Math.abs(sinBeta) >= 1 ? Math.sign(sinBeta)*90 : Math.asin(sinBeta)*180/Math.PI;
+    let gamma = Math.atan2(2*(w*x + y*z), 1 - 2*(x*x + y*y)) * 180/Math.PI;
+    return { alpha: this.norm(alpha), beta: this.norm(beta), gamma: this.norm(gamma) };
+  }
 
-    camView.addEventListener('touchend', function() {
-        isDragging = false;
-    });  
-	  
+  norm(a) { while (a > 180) a -= 360; while (a < -180) a += 360; return a; }
 
-      fullscreenBtn.onclick = () => {
-    // 检查全屏状态的跨浏览器方法
-    const isFullscreen = document.fullscreenElement || 
-                        document.webkitFullscreenElement || 
-                        document.mozFullScreenElement ||
-                        document.msFullscreenElement;
-
-    if (!isFullscreen) {
-        // 进入全屏
-        const el = document.documentElement;
-        if (el.requestFullscreen) el.requestFullscreen();
-        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-        else if (el.mozRequestFullScreen) el.mozRequestFullScreen();
-        else if (el.msRequestFullscreen) el.msRequestFullscreen();
-    } else {
-        // 退出全屏
-        if (document.exitFullscreen) document.exitFullscreen();
-        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-        else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
-        else if (document.msExitFullscreen) document.msExitFullscreen();
+  slerp(o, t) {
+    let dot = this.w*o.w + this.x*o.x + this.y*o.y + this.z*o.z;
+    if (dot < 0) { o = new Quaternion(-o.w, -o.x, -o.y, -o.z); dot = -dot; }
+    if (dot > 0.9995) {
+      return new Quaternion(
+        this.w + t*(o.w - this.w),
+        this.x + t*(o.x - this.x),
+        this.y + t*(o.y - this.y),
+        this.z + t*(o.z - this.z)
+      ).normalize();
     }
-};
-document.addEventListener('fullscreenchange', updateFullscreenButton);
-document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
-document.addEventListener('mozfullscreenchange', updateFullscreenButton);
-document.addEventListener('MSFullscreenChange', updateFullscreenButton);
+    const th0 = Math.acos(Math.abs(dot)), th = th0*t;
+    const st = Math.sin(th), st0 = Math.sin(th0);
+    const s0 = Math.cos(th) - dot*st/st0, s1 = st/st0;
+    return new Quaternion(
+      s0*this.w + s1*o.w,
+      s0*this.x + s1*o.x,
+      s0*this.y + s1*o.y,
+      s0*this.z + s1*o.z
+    );
+  }
 
-function updateFullscreenButton() {
-    const isFullscreen = document.fullscreenElement || 
-                        document.webkitFullscreenElement || 
-                        document.mozFullScreenElement ||
-                        document.msFullscreenElement;
-    
-    fullscreenBtn.textContent = isFullscreen ? "⛶ 退出全屏" : "⛶ 全屏";
+  normalize() {
+    const l = Math.hypot(this.w, this.x, this.y, this.z);
+    return l === 0 ? new Quaternion(1, 0, 0, 0)
+                   : new Quaternion(this.w/l, this.x/l, this.y/l, this.z/l);
+  }
 }
-      centerBtn.onclick = () => {
-		  headingOffset = lastHeading -180;
-		  pitchBase = lastRawBeta ;
 
-		  targetYaw = 0;
-		  targetPitch = 0;
-		  cameraYaw = 0;
-		  cameraPitch = 0;
+class QuaternionSmoother {
+  constructor(f = 0.1) {
+    this.smoothFactor = f;
+    this.currentQuaternion = new Quaternion(1, 0, 0, 0);
+  }
+  smoothOrientation(alpha, beta, gamma, aO = 0, bO = 0, gO = 0) {
+    const nq = Quaternion.fromEuler(alpha + aO, beta + bO, gamma + gO);
+    this.currentQuaternion = this.currentQuaternion.slerp(nq, this.smoothFactor);
+    const e = this.currentQuaternion.toEuler();
+    return [e.alpha, e.beta, e.gamma];
+  }
+  reset() { this.currentQuaternion = new Quaternion(1, 0, 0, 0); }
+}
 
-		  smoother.reset(); // 平滑器归零防止跳变
-		  message.innerText = "视角已居中，已设置当前位置为初始朝向";
-      };
+const smoother = new QuaternionSmoother(0.1);
 
-      // 设备方向控制
-      if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission().then(response => {
-          if (response === 'granted') {
-            window.addEventListener("deviceorientation", handleOrientation, true);
-            message.innerText = "已启用罗盘控制";
-          }
-        }).catch(err => {
-          message.innerText = "请求罗盘权限失败：" + err;
-        });
-      } else {
-        window.addEventListener("deviceorientation", handleOrientation, true);
-        message.innerText = "已启用罗盘控制";
-      }
-    }
+function wrapAngle(a, min, max) {
+  const r = max - min;
+  while (a < min) a += r;
+  while (a >= max) a -= r;
+  return a;
+}
 
-    // 创建默认测试纹理 - 程序生成避免跨域问题
-    function createDefaultTexture() {
-      const canvas = document.createElement('canvas');
-	  canvas.id = "vrView";
-      canvas.width = 2048;
-      canvas.height = 1024;
-      const ctx = canvas.getContext('2d');
-      
-      // 创建渐变背景
-      const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-      gradient.addColorStop(0, '#1e3c72');
-      gradient.addColorStop(1, '#2a5298');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // 添加网格线
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.lineWidth = 2;
-      const gridSize = 64;
-      for (let x = 0; x <= canvas.width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvas.height);
-        ctx.stroke();
-      }
-      for (let y = 0; y <= canvas.height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
-      }
-      
-      // 添加文字标识 - 注意文字方向
-      ctx.fillStyle = 'white';
-      ctx.font = '48px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('左眼 VR 测试', canvas.width / 4, canvas.height / 2 - 30);
-      ctx.fillText('Left Eye VR Test', canvas.width / 4, canvas.height / 2 + 30);
-      ctx.fillText('右眼 VR 测试', (canvas.width / 4) * 3, canvas.height / 2 - 30);
-      ctx.fillText('Right Eye VR Test', (canvas.width / 4) * 3, canvas.height / 2 + 30);
-      
-      // 创建纹理时正确设置参数
-      texture = new THREE.CanvasTexture(canvas);
+/* ============================================================
+   3. 初始化
+   ============================================================ */
+function init() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setScissorTest(true);
+  camView.appendChild(renderer.domElement);
+
+  sceneL = new THREE.Scene();
+  sceneR = new THREE.Scene();
+
+  const aspect = (window.innerWidth / 2) / window.innerHeight;
+  cameraL = new THREE.PerspectiveCamera(DEFAULT_FOV, aspect, 0.1, 2000);
+  cameraR = new THREE.PerspectiveCamera(DEFAULT_FOV, aspect, 0.1, 2000);
+
+  createDefaultTexture();
+
+  document.getElementById("fileInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    video.src = URL.createObjectURL(file);
+    video.load();
+    video.onloadeddata = () => {
+      texture = new THREE.VideoTexture(video);
       texture.minFilter = THREE.LinearFilter;
       texture.magFilter = THREE.LinearFilter;
-      texture.generateMipmaps = false; // 关键修复：禁用 mipmap 生成
-      texture.flipY = true; // 修复：Canvas纹理也需要翻转
-      texture.needsUpdate = true;
-      
-      createScene(texture);
-      message.innerText = "默认测试场景已加载";
-    }
+      texture.format = THREE.RGBFormat;
+      texture.generateMipmaps = false;
+      texture.flipY = true;
+      buildScene(texture);
+      videoLoaded = true;
+      applyUiVisibility();
+      message.innerText = "Video loaded — press play";
+      centerView();
+    };
+  });
 
-    function showButtons() {
-      video.style.display = fullscreenBtn.style.display = centerBtn.style.display = "inline-block";
-    }
+  zoomSlider.addEventListener("input", () => {
+    const fov = parseFloat(zoomSlider.value);
+    cameraL.fov = cameraR.fov = fov;
+    cameraL.updateProjectionMatrix();
+    cameraR.updateProjectionMatrix();
+  });
+  splitSlider.addEventListener("input", () => {
+    splitRatio = parseFloat(splitSlider.value);
+  });
 
-    function createScene(texture) {
-      // 清空场景
-      while(sceneL.children.length > 0) {
-        sceneL.remove(sceneL.children[0]);
-      }
-      while(sceneR.children.length > 0) {
-        sceneR.remove(sceneR.children[0]);
-      }
+  centerBtn.onclick = centerView;
+  resetBtn.onclick  = resetAll;
 
-      const geometry = new THREE.SphereGeometry(500, 64, 32, Math.PI/2, Math.PI, 0, Math.PI);
-      // 修复：只翻转X轴，让球体内表面朝向中心
-      geometry.scale(-1, 1, 1);
+  fullscreenBtn.onclick = toggleFullscreen;
+  ["fullscreenchange","webkitfullscreenchange","mozfullscreenchange","MSFullscreenChange"]
+    .forEach(ev => document.addEventListener(ev, updateFullscreenButton));
 
-      // 左眼视图 - UV 映射到纹理的左半部分
-      const geoL = geometry.clone();
-	  // 右眼视图 - UV 映射到纹理的右半部分
-      const geoR = geometry.clone();
-      const uvL = geoL.attributes.uv;
-      const uvR = geoR.attributes.uv;
+  viewBothBtn.onclick  = () => setDisplayMode('both');
+  viewLeftBtn.onclick  = () => setDisplayMode('left');
+  viewRightBtn.onclick = () => setDisplayMode('right');
 
-      for (let i = 0; i < uvL.count; i++) {
-        uvL.setX(i, uvL.getX(i) * 0.5 );
-      }
-  
-      for (let i = 0; i < uvR.count; i++) {
-        uvR.setX(i, uvR.getX(i) * 0.5 + 0.5);
-      }
+  modePhoneBtn.onclick = () => switchMode('phone');
+  modeHidBtn.onclick   = () => switchMode('hid');
 
-      const mat = new THREE.MeshBasicMaterial({ map: texture });
+  document.getElementById('connectHid').onclick    = connectHid;
+  document.getElementById('disconnectHid').onclick = disconnectHid;
 
-      sceneL.add(new THREE.Mesh(geoL, mat));
-      sceneR.add(new THREE.Mesh(geoR, mat));
-    }
-	class QuaternionSmoother {
-		constructor(smoothFactor = 0.1) {
-			this.smoothFactor = smoothFactor;
-			this.currentQuaternion = new Quaternion(1, 0, 0, 0); // 初始化为单位四元数
-		}
-		
-		// 主要处理函数
-		smoothOrientation(alpha, beta, gamma, alphaOffset = 0, betaOffset = 0, gammaOffset = 0) {
-			// 应用偏移量
-			const adjustedAlpha = alpha + alphaOffset;
-			const adjustedBeta = beta + betaOffset;
-			const adjustedGamma = gamma + gammaOffset;
-			
-			// 转换为四元数
-			const newQuaternion = Quaternion.fromEuler(adjustedAlpha, adjustedBeta, adjustedGamma);
-			
-			// 使用SLERP进行平滑
-			this.currentQuaternion = this.currentQuaternion.slerp(newQuaternion, this.smoothFactor);
-			
-			// 转换回欧拉角
-			const smoothedEuler = this.currentQuaternion.toEuler();
-			
-			// 返回处理后的数组
-			return [smoothedEuler.alpha, smoothedEuler.beta, smoothedEuler.gamma];
-		}
-		
-		// 重置平滑器状态
-		reset() {
-			this.currentQuaternion = new Quaternion(1, 0, 0, 0);
-		}
-		
-		// 设置平滑因子
-		setSmoothFactor(factor) {
-			this.smoothFactor = Math.max(0.01, Math.min(1.0, factor));
-		}
-	}
+  bindUiToggle();
 
-	class Quaternion {
-		constructor(w = 1, x = 0, y = 0, z = 0) {
-			this.w = w;
-			this.x = x;
-			this.y = y;
-			this.z = z;
-		}
-		
-		// 从欧拉角创建四元数 (ZYX顺序: alpha, beta, gamma)
-		static fromEuler(alpha, beta, gamma) {
-			// 转换为弧度并除以2
-			const a = alpha * Math.PI / 180 / 2;
-			const b = beta * Math.PI / 180 / 2;
-			const g = gamma * Math.PI / 180 / 2;
-			
-			const ca = Math.cos(a);
-			const sa = Math.sin(a);
-			const cb = Math.cos(b);
-			const sb = Math.sin(b);
-			const cg = Math.cos(g);
-			const sg = Math.sin(g);
-			
-			return new Quaternion(
-				ca * cb * cg + sa * sb * sg,
-				sa * cb * cg - ca * sb * sg,
-				ca * sb * cg + sa * cb * sg,
-				ca * cb * sg - sa * sb * cg
-			);
-		}
-		
-		// 转换为欧拉角
-		toEuler() {
-			const w = this.w;
-			const x = this.x;
-			const y = this.y;
-			const z = this.z;
-			
-			// Alpha (Z轴旋转)
-			let alpha = Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)) * 180 / Math.PI;
-			
-			// Beta (Y轴旋转)
-			const sinBeta = 2 * (w * y - z * x);
-			let beta = Math.abs(sinBeta) >= 1 ? 
-				Math.sign(sinBeta) * 90 : 
-				Math.asin(sinBeta) * 180 / Math.PI;
-			
-			// Gamma (X轴旋转)
-			let gamma = Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)) * 180 / Math.PI;
-			
-			// 确保角度在合理范围内
-			alpha = this.normalizeAngle(alpha);
-			beta = this.normalizeAngle(beta);
-			gamma = this.normalizeAngle(gamma);
-			
-			return { alpha, beta, gamma };
-		}
-		
-		// 角度标准化到 [-180, 180]
-		normalizeAngle(angle) {
-			while (angle > 180) angle -= 360;
-			while (angle < -180) angle += 360;
-			return angle;
-		}
-		
-		// 四元数球面线性插值 (SLERP)
-		slerp(other, t) {
-			let dot = this.w * other.w + this.x * other.x + this.y * other.y + this.z * other.z;
-			
-			// 确保走最短路径
-			if (dot < 0) {
-				other = new Quaternion(-other.w, -other.x, -other.y, -other.z);
-				dot = -dot;
-			}
-			
-			// 如果四元数非常接近，使用线性插值
-			if (dot > 0.9995) {
-				return new Quaternion(
-					this.w + t * (other.w - this.w),
-					this.x + t * (other.x - this.x),
-					this.y + t * (other.y - this.y),
-					this.z + t * (other.z - this.z)
-				).normalize();
-			}
-			
-			// 球面线性插值
-			const theta0 = Math.acos(Math.abs(dot));
-			const theta = theta0 * t;
-			const sinTheta = Math.sin(theta);
-			const sinTheta0 = Math.sin(theta0);
-			
-			const s0 = Math.cos(theta) - dot * sinTheta / sinTheta0;
-			const s1 = sinTheta / sinTheta0;
-			
-			return new Quaternion(
-				s0 * this.w + s1 * other.w,
-				s0 * this.x + s1 * other.x,
-				s0 * this.y + s1 * other.y,
-				s0 * this.z + s1 * other.z
-			);
-		}
-		
-		// 四元数标准化
-		normalize() {
-			const length = Math.sqrt(this.w * this.w + this.x * this.x + this.y * this.y + this.z * this.z);
-			if (length === 0) return new Quaternion(1, 0, 0, 0);
-			
-			return new Quaternion(
-				this.w / length,
-				this.x / length,
-				this.y / length,
-				this.z / length
-			);
-		}
-	}
-	const smoother = new QuaternionSmoother(0.1); // 0.1 是平滑因子
-function wrapAngle(angle, min, max) {
-  const range = max - min;
-  while (angle < min) angle += range;
-  while (angle >= max) angle -= range;
-  return angle;
+  // 默认 HID 模式
+  switchMode('hid');
 }
-    function handleOrientation(event) {
-      // 检查传感器数据有效性
-      if (event.alpha === null || event.beta === null || event.gamma === null) {
-        return;
-      }
 
-      const alpha = event.alpha || 0;
-      const beta = event.beta || 0;
-      const gamma = event.gamma || 0;
-      
-//	  const a_o = 0;
-//	  const b_o = 0;
-//	  const g_o = 0;
-//	  if (headingOffset != null) a_o = headingOffset;
-//      if (pitchBase != null) b_o = pitchBase;
-	  
-      // 处理并获取平滑后的角度
-      const [smoothAlpha, smoothBeta, smoothGamma] = smoother.smoothOrientation(
-          alpha, beta, gamma,
-          0, 0, 0  // 偏移量，可根据需要调整
-      );
-      
-      let heading = 0;
-      if (typeof event.webkitCompassHeading === 'number') {
-        heading = event.webkitCompassHeading;
-      } else if (typeof smoothAlpha === 'number') {
-        heading = 180 - smoothAlpha;
-      }
-      rawBeta = smoothGamma;
- 
-      // 初始化基准值
- //     if (headingOffset === null) headingOffset = heading;
- //     if (pitchBase === null) pitchBase = rawBeta;
-		lastHeading = heading;
-		lastRawBeta = rawBeta;
-      const relativeYaw = heading - headingOffset; 
-      const relativePitch = rawBeta - pitchBase;
+/* ============================================================
+   4. 显示模式
+   ============================================================ */
+function setDisplayMode(mode) {
+  displayMode = mode;
+  viewBothBtn.classList.toggle('active',  mode === 'both');
+  viewLeftBtn.classList.toggle('active',  mode === 'left');
+  viewRightBtn.classList.toggle('active', mode === 'right');
+  updateCameraAspect();
+  message.innerText = "View: " + mode.toUpperCase();
+}
 
-      // 修复：正确的坐标系映射和范围限制
-      // 将手机坐标系映射到3D场景坐标系
-      const mappedYaw = relativePitch; // 手机的俯仰对应3D的偏航
-      const mappedPitch = -relativeYaw; // 手机的偏航对应3D的俯仰（取负值）
-      
- // 上移90度的 pitch 修正量
-const pitchCorrection = -90;
+function updateCameraAspect() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const aspect = (displayMode === 'both') ? (w / 2) / h : w / h;
+  cameraL.aspect = cameraR.aspect = aspect;
+  cameraL.updateProjectionMatrix();
+  cameraR.updateProjectionMatrix();
+}
 
-// 使用 wrapAngle 来处理 ±360° 的越界
-targetYaw = wrapAngle(mappedYaw - 90, -180, 180);
-targetPitch = wrapAngle(90 - mappedPitch + pitchCorrection, 0, 360);
+/* ============================================================
+   5. Center / Reset / Fullscreen
+   ============================================================ */
+function centerView() {
+  if (orientationMode === 'hid') {
+    // HID：把"当前朝向"记为新的正前方。
+    // 用偏移量而不是把 yawDeg/pitchDeg 清零——pitch 有重力互补滤波，
+    // 清零后会被慢慢拉回重力角度，导致居中后画面上下漂移。
+    hidYawOffset   = yawDeg;
+    hidPitchOffset = pitchDeg;
+  } else {
+    headingOffset = lastHeading;
+    pitchBase     = lastRawBeta;
+  }
+  targetYaw = 0; targetPitch = 0;
+  cameraYaw = 0; cameraPitch = 0;
+  smoother.reset();
+  message.innerText = "View centered";
+}
 
-// 限制范围
-targetYaw = THREE.MathUtils.clamp(targetYaw, -180, 0);
-targetPitch = THREE.MathUtils.clamp(targetPitch, 90, 270);
+function resetAll() {
+  zoomSlider.value = DEFAULT_FOV;
+  cameraL.fov = cameraR.fov = DEFAULT_FOV;
+  cameraL.updateProjectionMatrix();
+  cameraR.updateProjectionMatrix();
 
-      // 显示调试信息
-      message.innerText = `偏航: ${targetYaw.toFixed(1)}° / 俯仰: ${targetPitch.toFixed(1)}° | 范围: ±90°`;
-    }
+  splitSlider.value = DEFAULT_SPLIT;
+  splitRatio = DEFAULT_SPLIT;
 
-    function animate() {
-      requestAnimationFrame(animate);
-      
-      // 平滑相机移动
-      cameraYaw += (targetYaw - cameraYaw) * 0.1;
-      cameraPitch += (targetPitch - cameraPitch) * 0.1;
+  setDisplayMode('both');
 
-      // 计算相机朝向
-      const yawRad = THREE.MathUtils.degToRad(cameraYaw);
-      const pitchRad = THREE.MathUtils.degToRad(cameraPitch);
-      const x = Math.cos(pitchRad) * Math.sin(yawRad);
-      const y = Math.sin(pitchRad);
-      const z = Math.cos(pitchRad) * Math.cos(yawRad);
-      const lookAt = new THREE.Vector3(-x, -y, -z);
+  hidYawOffset   = yawDeg;
+  hidPitchOffset = pitchDeg;
 
-      cameraL.lookAt(lookAt);
-      cameraR.lookAt(lookAt);
+  headingOffset = null; pitchBase = null;
+  smoother.reset();
 
-      // 更新视频纹理
-      if (texture && texture.isVideoTexture) {
-        texture.needsUpdate = true;
-      }
+  targetYaw = 0; targetPitch = 0;
+  cameraYaw = 0; cameraPitch = 0;
 
-      // 渲染左右眼视图
-      const w = window.innerWidth, h = window.innerHeight;
-      
-      // 左眼
-      renderer.setViewport(0, 0, w/2, h);
-      renderer.setScissor(0, 0, w*splitRatio, h);
-      renderer.render(sceneL, cameraL);
+  message.innerText = "Reset";
+}
 
-      // 右眼
-      renderer.setViewport(w/2, 0, w/2, h);
-      renderer.setScissor(w*splitRatio, 0, w*(1-splitRatio), h);
-      renderer.render(sceneR, cameraR);
-    }
+function toggleFullscreen() {
+  const isFs = document.fullscreenElement || document.webkitFullscreenElement ||
+               document.mozFullScreenElement || document.msFullscreenElement;
+  if (!isFs) {
+    const el = document.documentElement;
+    (el.requestFullscreen || el.webkitRequestFullscreen ||
+     el.mozRequestFullScreen || el.msRequestFullscreen).call(el);
+  } else {
+    (document.exitFullscreen || document.webkitExitFullscreen ||
+     document.mozCancelFullScreen || document.msExitFullscreen).call(document);
+  }
+}
+function updateFullscreenButton() {
+  const isFs = document.fullscreenElement || document.webkitFullscreenElement ||
+               document.mozFullScreenElement || document.msFullscreenElement;
+  fullscreenBtn.textContent = isFs ? "⛶ Exit" : "⛶ Fullscreen";
+}
 
-    // 处理窗口大小变化
-    window.addEventListener('resize', () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      
-      renderer.setSize(w, h);
-      
-      const aspect = (w / 2) / h;
-      cameraL.aspect = aspect;
-      cameraR.aspect = aspect;
-      cameraL.updateProjectionMatrix();
-      cameraR.updateProjectionMatrix();
-    });
-  </script>
+/* ============================================================
+   6. 模式切换
+   ============================================================ */
+function switchMode(mode) {
+  if (mode === 'hid') {
+    if (!hidDevice) { message.innerText = "Connect a HID device first"; return; }
+    stopPhoneOrientation();
+    orientationMode = 'hid';
+    modeHidBtn.classList.add('active');
+    modePhoneBtn.classList.remove('active');
+    yawDeg = pitchDeg = rollDeg = 0;
+    hidYawOffset = 0; hidPitchOffset = 0;
+    lastSampleTime = null;
+    smoother.reset();
+    message.innerText = "Source: HID glasses";
+  } else {
+    startPhoneOrientation();
+    orientationMode = 'phone';
+    modePhoneBtn.classList.add('active');
+    modeHidBtn.classList.remove('active');
+    headingOffset = null; pitchBase = null;
+    smoother.reset();
+    message.innerText = "Source: Phone sensor";
+  }
+}
+
+/* ============================================================
+   7. 手机传感器（保留，不参与 HID 计算）
+   ============================================================ */
+function startPhoneOrientation() {
+  if (phoneOrientationActive) return;
+
+  const attach = () => {
+    window.addEventListener("deviceorientation", handleOrientation, true);
+    phoneOrientationActive = true;
+  };
+
+  if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission().then(r => {
+      if (r === 'granted') attach();
+      else message.innerText = "Phone sensor permission denied";
+    }).catch(err => { message.innerText = "Permission error: " + err; });
+  } else {
+    attach();
+  }
+}
+function stopPhoneOrientation() {
+  window.removeEventListener("deviceorientation", handleOrientation, true);
+  phoneOrientationActive = false;
+}
+
+function handleOrientation(event) {
+  if (orientationMode !== 'phone') return;
+  if (event.alpha === null || event.beta === null || event.gamma === null) return;
+
+  const alpha = event.alpha || 0;
+  const beta  = event.beta  || 0;
+  const gamma = event.gamma || 0;
+
+  const [smoothAlpha, , smoothGamma] = smoother.smoothOrientation(alpha, beta, gamma, 0, 0, 0);
+
+  let heading = 0;
+  if (typeof event.webkitCompassHeading === 'number') heading = event.webkitCompassHeading;
+  else if (typeof smoothAlpha === 'number')           heading = 180 - smoothAlpha;
+
+  applyPhoneOrientation(heading, smoothGamma);
+}
+
+function applyPhoneOrientation(heading, rawBeta) {
+  if (heading == null || rawBeta == null || isNaN(heading) || isNaN(rawBeta)) return;
+
+  lastHeading = heading;
+  lastRawBeta = rawBeta;
+
+  if (headingOffset === null) headingOffset = heading;
+  if (pitchBase === null)     pitchBase     = rawBeta;
+
+  const relativeYaw   = heading - headingOffset;
+  const relativePitch = rawBeta - pitchBase;
+
+  const mappedYaw   = relativePitch;
+  const mappedPitch = -relativeYaw;
+  const pitchCorrection = -90;
+
+  targetYaw   = wrapAngle(mappedYaw - 90, -180, 180);
+  targetPitch = wrapAngle(90 - mappedPitch + pitchCorrection, 0, 360);
+
+  targetYaw   = THREE.MathUtils.clamp(targetYaw,   -180, 0);
+  targetPitch = THREE.MathUtils.clamp(targetPitch,   90, 270);
+
+  message.innerText = `[Phone] Yaw ${targetYaw.toFixed(1)}° / Pitch ${targetPitch.toFixed(1)}°`;
+}
+
+/* ============================================================
+   8. HID
+   ============================================================ */
+async function connectHid() {
+  if (!('hid' in navigator)) {
+    alert('WebHID not supported. Use desktop Chrome/Edge over https:// or http://localhost.');
+    return;
+  }
+  const vidStr = document.getElementById('vid').value.trim();
+  const pidStr = document.getElementById('pid').value.trim();
+  const filters = [];
+  if (vidStr) {
+    const f = { vendorId: parseInt(vidStr, 16) };
+    if (pidStr) f.productId = parseInt(pidStr, 16);
+    filters.push(f);
+  }
+
+  try {
+    const devices = await navigator.hid.requestDevice({ filters });
+    if (!devices.length) { message.innerText = "No device selected"; return; }
+    hidDevice = devices[0];
+    if (!hidDevice.opened) await hidDevice.open();
+    hidDevice.addEventListener('inputreport', handleHidInputReport);
+
+    document.getElementById('connectHid').disabled = true;
+    document.getElementById('disconnectHid').disabled = false;
+
+    yawDeg = pitchDeg = rollDeg = 0;
+    hidYawOffset = 0; hidPitchOffset = 0;
+    lastSampleTime = null;
+
+    switchMode('hid');
+  } catch (err) {
+    console.error(err);
+    message.innerText = "HID connect failed: " + err.message;
+  }
+}
+
+async function disconnectHid() {
+  if (hidDevice) {
+    hidDevice.removeEventListener('inputreport', handleHidInputReport);
+    try { await hidDevice.close(); } catch (e) {}
+    hidDevice = null;
+  }
+  document.getElementById('connectHid').disabled = false;
+  document.getElementById('disconnectHid').disabled = true;
+  switchMode('phone');
+}
+
+function parseReport(bytes) {
+  if (bytes.length < 48) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    ax: dv.getFloat32(4, true),
+    ay: dv.getFloat32(8, true),
+    az: dv.getFloat32(12, true),
+    gx: dv.getFloat32(16, true),
+    gy: dv.getFloat32(20, true),
+    gz: dv.getFloat32(24, true),
+  };
+}
+
+function handleHidInputReport(event) {
+  if (orientationMode !== 'hid') return;
+  const bytes = new Uint8Array(event.data.buffer);
+  const p = parseReport(bytes);
+  if (!p) return;
+
+  updatePose(p.ax, p.ay, p.az, p.gx, p.gy, p.gz);
+  applyHidOrientation(yawDeg, pitchDeg);
+}
+
+function updatePose(ax, ay, az, gx, gy, gz) {
+  const now = performance.now();
+  let dt = lastSampleTime === null ? 0 : (now - lastSampleTime) / 1000;
+  lastSampleTime = now;
+  dt = Math.min(dt, 0.5);
+
+  pitchDeg += gx * dt;
+  yawDeg   += gy * dt;
+  rollDeg  += gz * dt;
+
+  const accMag = Math.sqrt(ax*ax + ay*ay + az*az);
+  if (accMag > 7 && accMag < 12) {
+    const rollAcc  = Math.atan2(ax, ay) * 180 / Math.PI;
+    const pitchAcc = Math.atan2(-az, ay) * 180 / Math.PI;
+    const alpha = 0.02;
+    rollDeg  = rollDeg  * (1 - alpha) + rollAcc  * alpha;
+    pitchDeg = pitchDeg * (1 - alpha) + pitchAcc * alpha;
+  }
+}
+
+/* HID 映射：传感器角度 → 相机角度
+   相机约定：targetYaw 正 = 向右看，targetPitch 正 = 向上看
+   方向不对请改文件顶部的 HID_YAW_SIGN / HID_PITCH_SIGN */
+function applyHidOrientation(rawYaw, rawPitch) {
+  const relYaw   = rawYaw   - hidYawOffset;
+  const relPitch = rawPitch - hidPitchOffset;
+
+  targetYaw   = THREE.MathUtils.clamp(HID_YAW_SIGN   * relYaw,   -180, 180);
+  targetPitch = THREE.MathUtils.clamp(HID_PITCH_SIGN * relPitch,  -90,  90);
+
+  message.innerText = `[HID] Yaw ${targetYaw.toFixed(1)}° / Pitch ${targetPitch.toFixed(1)}°`;
+}
+
+/* ============================================================
+   9. 点击主画面：显示 / 隐藏 UI（工具栏、原生播放器、提示文字）
+   ============================================================ */
+function applyUiVisibility() {
+  toolbar.style.display = uiVisible ? 'flex' : 'none';
+  video.style.display   = (uiVisible && videoLoaded) ? 'block' : 'none';
+  message.style.display = uiVisible ? 'block' : 'none';
+}
+
+function bindUiToggle() {
+  // 只监听 three 的 canvas：点工具栏 / 原生播放器本身不会触发切换
+  renderer.domElement.addEventListener('click', () => {
+    uiVisible = !uiVisible;
+    applyUiVisibility();
+  });
+}
+
+/* ============================================================
+   10. 默认纹理
+   ============================================================ */
+function createDefaultTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2048;
+  canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
+
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, '#1e3c72');
+  gradient.addColorStop(1, '#2a5298');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.30)';
+  ctx.lineWidth = 2;
+  const gridSize = 64;
+  for (let x = 0; x <= canvas.width; x += gridSize) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y <= canvas.height; y += gridSize) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(0, canvas.height/2); ctx.lineTo(canvas.width, canvas.height/2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(canvas.width/2, 0); ctx.lineTo(canvas.width/2, canvas.height); ctx.stroke();
+
+  ctx.fillStyle = 'white';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 96px Arial';
+  ctx.fillText('LEFT',  canvas.width / 4,     canvas.height / 2);
+  ctx.fillText('RIGHT', (canvas.width / 4) * 3, canvas.height / 2);
+
+  // UP / DOWN 分别画在左右两半的中线上，每只眼都能完整看到
+  ctx.font = 'bold 72px Arial';
+  ctx.fillStyle = '#ffd24a';
+  for (const cx of [canvas.width / 4, (canvas.width / 4) * 3]) {
+    ctx.fillText('UP',   cx, 120);
+    ctx.fillText('DOWN', cx, canvas.height - 120);
+  }
+
+  texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.flipY = true;
+  texture.needsUpdate = true;
+
+  buildScene(texture);
+  message.innerText = "Default test scene loaded";
+}
+
+/* ============================================================
+   11. 场景构建
+   半球面 + BackSide，半球正中心对准相机默认朝向(-Z)
+   ------------------------------------------------------------
+   SphereGeometry 顶点：x = -cos(phi)·sinθ, z = sin(phi)·sinθ
+   phi 取 [π, 2π]：u=0 → +X(右)，u=0.5 → -Z(正前方)，u=1 → -X(左)
+   从球内往外看，u 增大的方向是向左，所以取 1-u 抵消镜像。
+   左眼取纹理左半 [0, 0.5]，右眼取纹理右半 [0.5, 1]。
+   ============================================================ */
+function buildScene(texture) {
+  while (sceneL.children.length) sceneL.remove(sceneL.children[0]);
+  while (sceneR.children.length) sceneR.remove(sceneR.children[0]);
+
+  const geometry = new THREE.SphereGeometry(
+    500, 64, 32,
+    Math.PI, Math.PI,   // phiStart = π → 半球中心在 -Z（相机正前方）
+    0, Math.PI
+  );
+
+  const geoL = geometry.clone();
+  const geoR = geometry.clone();
+  const uvL = geoL.attributes.uv;
+  const uvR = geoR.attributes.uv;
+
+  const leftHalf  = SWAP_EYES ? 0.5 : 0.0;   // 左眼使用的纹理起点
+  const rightHalf = SWAP_EYES ? 0.0 : 0.5;   // 右眼使用的纹理起点
+
+  for (let i = 0; i < uvL.count; i++) {
+    uvL.setX(i, leftHalf  + (1 - uvL.getX(i)) * 0.5);
+  }
+  for (let i = 0; i < uvR.count; i++) {
+    uvR.setX(i, rightHalf + (1 - uvR.getX(i)) * 0.5);
+  }
+
+  const matL = new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide });
+  const matR = new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide });
+
+  sceneL.add(new THREE.Mesh(geoL, matL));
+  sceneR.add(new THREE.Mesh(geoR, matR));
+}
+
+/* ============================================================
+   12. 渲染循环
+   ============================================================ */
+function animate() {
+  requestAnimationFrame(animate);
+
+  cameraYaw   += (targetYaw   - cameraYaw)   * 0.1;
+  cameraPitch += (targetPitch - cameraPitch) * 0.1;
+
+  const yawRad   = THREE.MathUtils.degToRad(cameraYaw);
+  const pitchRad = THREE.MathUtils.degToRad(cameraPitch);
+  // yaw=0,pitch=0 时看向 -Z（three.js 相机默认朝向，也是半球的正中心）
+  // yaw 正 = 向右(+X)，pitch 正 = 向上(+Y)
+  const x =  Math.cos(pitchRad) * Math.sin(yawRad);
+  const y =  Math.sin(pitchRad);
+  const z = -Math.cos(pitchRad) * Math.cos(yawRad);
+  const lookAt = new THREE.Vector3(x, y, z);
+
+  cameraL.lookAt(lookAt);
+  cameraR.lookAt(lookAt);
+
+  if (texture && texture.isVideoTexture) texture.needsUpdate = true;
+
+  const w = window.innerWidth, h = window.innerHeight;
+
+  if (displayMode === 'both') {
+    renderer.setViewport(0, 0, w/2, h);
+    renderer.setScissor(0, 0, w*splitRatio, h);
+    renderer.render(sceneL, cameraL);
+
+    renderer.setViewport(w/2, 0, w/2, h);
+    renderer.setScissor(w*splitRatio, 0, w*(1-splitRatio), h);
+    renderer.render(sceneR, cameraR);
+
+  } else if (displayMode === 'left') {
+    renderer.setViewport(0, 0, w, h);
+    renderer.setScissor(0, 0, w, h);
+    renderer.render(sceneL, cameraL);
+
+  } else {
+    renderer.setViewport(0, 0, w, h);
+    renderer.setScissor(0, 0, w, h);
+    renderer.render(sceneR, cameraR);
+  }
+}
+
+window.addEventListener('resize', () => {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  updateCameraAspect();
+});
+
+/* ============================================================
+   13. 启动
+   ============================================================ */
+init();
+animate();
+</script>
 </body>
 </html>
