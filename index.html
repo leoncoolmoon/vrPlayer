@@ -22,6 +22,31 @@
   }
   #toolbar.hidden { transform: translateY(-110%); opacity: 0; pointer-events: none; }
 
+  /* 3D 模式：工具栏/提示各复制一份，分别居中在左右半屏，方便透过眼镜重叠融合 */
+  #toolbarMirror {
+    position: absolute; top: 0; left: 50%; width: 50%;
+    display: none; align-items: center; justify-content: center;
+    flex-wrap: wrap; gap: 8px;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px);
+    z-index: 100;
+    font-size: 12px; color: #eee;
+    pointer-events: none;   /* 只是镜像显示，点击一律走左边真正的工具栏 */
+  }
+  body.sbs-ui-split #toolbar { width: 50%; }
+  body.sbs-ui-split #toolbarMirror { display: flex; }
+
+  #messageMirror {
+    position: absolute; bottom: 14px; left: 75%; transform: translateX(-50%);
+    color: #fff; background: rgba(0,0,0,0.65);
+    padding: 6px 14px; border-radius: 6px;
+    font-size: 12px; z-index: 50; white-space: nowrap;
+    display: none; pointer-events: none;
+  }
+  body.sbs-ui-split #message { left: 25%; }
+  body.sbs-ui-split #messageMirror { display: block; }
+
   .tb-group {
     display: flex; align-items: center; gap: 6px;
     padding: 4px 8px;
@@ -43,6 +68,9 @@
   input[type=text] { width: 64px; font-family: monospace; color: #7f7; background: #111; }
   input[type=range] { padding: 0; height: 18px; width: 90px; background: transparent; border: none; cursor: pointer; }
   input[type=file] { padding: 3px 6px; max-width: 150px; }
+
+  #glassesInfo { font-size: 11px; opacity: .85; white-space: nowrap; }
+  #glassesInfo.warn { color: #fa0; opacity: 1; }
 
   #message {
     position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
@@ -80,6 +108,9 @@
       <input type="range" id="zoomSlider" min="30" max="120" value="75" />
       <label>Split</label>
       <input type="range" id="splitSlider" min="0.4" max="0.6" step="0.01" value="0.5" />
+      <label>Proj</label>
+      <input type="range" id="projSlider" min="0" max="360" step="1" value="180" title="0=平面 / 180=半球(默认) / 360=整球" />
+      <span id="projValue">180°</span>
       <button id="centerBtn">⊙ Center</button>
       <button id="resetBtn">↺ Reset</button>
     </div>
@@ -105,11 +136,20 @@
     </div>
 
     <div class="tb-group">
+      <label>Glasses</label>
+      <button id="glasses3dBtn" disabled title="发送 66 06 00">🎬 3D</button>
+      <button id="glassesNormalBtn" disabled title="发送 66 07 00">📺 Normal</button>
+      <span id="glassesInfo"></span>
+    </div>
+
+    <div class="tb-group">
       <button id="fullscreenBtn">⛶ Fullscreen</button>
     </div>
   </div>
 
+  <div id="toolbarMirror"></div>
   <div id="message">Loading…</div>
+  <div id="messageMirror"></div>
   <video id="video" playsinline muted controls crossorigin="anonymous"></video>
 </div>
 
@@ -128,6 +168,8 @@ let renderer, sceneL, sceneR, cameraL, cameraR, texture;
 const video          = document.getElementById("video");
 const zoomSlider     = document.getElementById("zoomSlider");
 const splitSlider    = document.getElementById("splitSlider");
+const projSlider     = document.getElementById("projSlider");
+const projValue      = document.getElementById("projValue");
 const message        = document.getElementById("message");
 const fullscreenBtn  = document.getElementById("fullscreenBtn");
 const centerBtn      = document.getElementById("centerBtn");
@@ -145,6 +187,8 @@ let cameraYaw = 0, cameraPitch = 0;
 let splitRatio = 0.5;
 const DEFAULT_FOV = 75;
 const DEFAULT_SPLIT = 0.5;
+const DEFAULT_PROJECTION = 180;   // 0=纯平面，180=半球（原来的效果），360=整球
+let projectionAngle = DEFAULT_PROJECTION;
 
 /* ---- 调试开关（方向不对时只需改这里）---- */
 const SWAP_EYES      = false; // 片源本身是"右眼在左半边"(交叉眼)时改为 true
@@ -258,7 +302,10 @@ function wrapAngle(a, min, max) {
    3. 初始化
    ============================================================ */
 function init() {
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+  // 抗锯齿默认关闭：双眼各渲染一遍，MSAA 开销直接翻倍，
+  // 而视频画面没有硬边缘，抗锯齿带来的观感提升很小，对大视频不划算。
+  // 如果更在意画质、机器又跑得动，可以手动改回 true。
+  renderer = new THREE.WebGLRenderer({ antialias: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setScissorTest(true);
   camView.appendChild(renderer.domElement);
@@ -281,9 +328,11 @@ function init() {
       texture = new THREE.VideoTexture(video);
       texture.minFilter = THREE.LinearFilter;
       texture.magFilter = THREE.LinearFilter;
-      texture.format = THREE.RGBFormat;
+      // 不强制 RGBFormat：video 解码出来天然是 RGBA，强制转 RGB 等于每帧多一次格式转换，
+      // 分辨率越高这笔开销越明显，去掉后交给 three.js 用默认（RGBA）格式。
       texture.generateMipmaps = false;
       texture.flipY = true;
+      attachVideoFrameCallback(video);   // 按视频真实帧率上传纹理，见下方函数说明
       buildScene(texture);
       videoLoaded = true;
       applyUiVisibility();
@@ -300,6 +349,11 @@ function init() {
   });
   splitSlider.addEventListener("input", () => {
     splitRatio = parseFloat(splitSlider.value);
+  });
+  projSlider.addEventListener("input", () => {
+    projectionAngle = parseFloat(projSlider.value);
+    projValue.textContent = projectionAngle.toFixed(0) + "°";
+    if (texture) buildScene(texture);   // 实时重建投影几何体
   });
 
   centerBtn.onclick = centerView;
@@ -318,6 +372,9 @@ function init() {
 
   document.getElementById('connectHid').onclick    = connectHid;
   document.getElementById('disconnectHid').onclick = disconnectHid;
+  document.getElementById('glasses3dBtn').onclick     = () => setGlassesMode('3d');
+  document.getElementById('glassesNormalBtn').onclick = () => setGlassesMode('normal');
+  window.addEventListener('resize', updateGlassesUI);   // 换分辨率/挪窗口后刷新屏幕尺寸提示
 
   bindUiToggle();
 
@@ -373,6 +430,11 @@ function resetAll() {
 
   splitSlider.value = DEFAULT_SPLIT;
   splitRatio = DEFAULT_SPLIT;
+
+  projSlider.value = DEFAULT_PROJECTION;
+  projectionAngle = DEFAULT_PROJECTION;
+  projValue.textContent = DEFAULT_PROJECTION + "°";
+  if (texture) buildScene(texture);
 
   setDisplayMode('both');
 
@@ -507,8 +569,108 @@ function applyPhoneOrientation(yaw, pitch) {
 }
 
 /* ============================================================
+   7.5 3D 模式下的工具栏/提示镜像
+   目的：眼镜 3D（SBS）模式下，左右眼分别只能看到屏幕的左半/右半。
+   工具栏原本横跨全屏，会被从中间切开，两只眼看到的是"同一份的两半"而不是
+   "各自完整的一份"，没法融合。这里在右半屏放一份纯展示的镜像（不可点击，
+   所有操作仍在左边真正的工具栏上进行），左右内容一致，方便透过眼镜重叠。
+   ============================================================ */
+const toolbarMirror = document.getElementById('toolbarMirror');
+const messageMirror  = document.getElementById('messageMirror');
+
+function syncToolbarMirror() { toolbarMirror.innerHTML = toolbar.innerHTML; }
+function syncMessageMirror()  { messageMirror.textContent = message.textContent; }
+
+new MutationObserver(syncToolbarMirror)
+  .observe(toolbar, { childList: true, subtree: true, attributes: true, characterData: true });
+new MutationObserver(syncMessageMirror)
+  .observe(message, { childList: true, subtree: true, characterData: true });
+
+function setSbsUiSplit(active) {
+  document.body.classList.toggle('sbs-ui-split', active);
+  if (active) { syncToolbarMirror(); syncMessageMirror(); }
+}
+
+/* ============================================================
    8. HID
    ============================================================ */
+/* ---- 眼镜命令表：按 vendorId/productId 识别型号，各自一套命令 ----
+   目前只有 RayNeo Air 2 的协议是抓包/用户验证过的。以后拿到别的型号的抓包，
+   照着这个格式加一条 profile 即可，不用改别处逻辑。
+   命令格式统一是 sendReport(reportId, bytes)；RayNeo 是 reportId=0、3 字节、不补零。 */
+const GLASSES_PROFILES = [
+  {
+    id: 'rayneo_air2',
+    label: 'RayNeo Air 2',
+    match: (d) => d.vendorId === 0x1bbb && d.productId === 0xaf50,
+    reportId: 0,
+    cmd: {
+      enableInput: [0x66, 0x01, 0x00],   // 已确认：开启 HID 输入（IMU 数据流）
+      mode3d:      [0x66, 0x06, 0x00],   // 3D（左右分屏 SBS）—— 用户报告，未独立验证
+      modeNormal:  [0x66, 0x07, 0x00],   // 正常模式 —— 用户报告，未独立验证
+      stop:        null,                  // 停止 HID 输出的命令还没找到；找到后填在这里
+    },
+  },
+  // { id: 'xxx', label: '型号名', match: d => d.vendorId===0x.... && d.productId===0x....,
+  //   reportId: 0, cmd: { enableInput:[...], mode3d:[...], modeNormal:[...], stop:[...] } },
+];
+
+let activeProfile = null;   // 连接时按 vendorId/productId 匹配出来的 profile；未识别型号为 null
+let glassesMode = null;     // '3d' | 'normal' | null（本页还没发过模式命令，眼镜实际状态未知）
+
+function detectGlassesProfile(device) {
+  return GLASSES_PROFILES.find(p => {
+    try { return p.match(device); } catch (e) { return false; }
+  }) || null;
+}
+
+async function sendGlassesCommand(bytes) {
+  if (!hidDevice || !hidDevice.opened || !bytes) return false;
+  try {
+    await hidDevice.sendReport((activeProfile ? activeProfile.reportId : 0), Uint8Array.from(bytes));
+    return true;
+  } catch (err) {
+    console.error(err);
+    message.innerText = 'Glasses command failed: ' + err.message;
+    return false;
+  }
+}
+
+async function setGlassesMode(mode) {
+  if (!activeProfile) return;   // 未识别型号：不知道命令是什么，按钮本来也是禁用的
+  const ok = await sendGlassesCommand(mode === '3d' ? activeProfile.cmd.mode3d : activeProfile.cmd.modeNormal);
+  if (!ok) return;
+  glassesMode = mode;
+  updateGlassesUI();
+  setSbsUiSplit(mode === '3d');   // 进 3D 复制一份工具栏；退回 Normal 恢复单份
+}
+
+function updateGlassesUI() {
+  const connected = !!hidDevice;
+  const b3 = document.getElementById('glasses3dBtn');
+  const bn = document.getElementById('glassesNormalBtn');
+  const info = document.getElementById('glassesInfo');
+  const known = connected && !!activeProfile;
+  b3.disabled = bn.disabled = !known;
+  b3.classList.toggle('active', known && glassesMode === '3d');
+  bn.classList.toggle('active', known && glassesMode === 'normal');
+  if (!connected) { info.textContent = ''; info.className = ''; return; }
+
+  if (!activeProfile) {
+    info.textContent = `⚠ 未识别的型号(VID:0x${(hidDevice.vendorId||0).toString(16)} PID:0x${(hidDevice.productId||0).toString(16)})，未自动发送任何命令`;
+    info.className = 'warn';
+    return;
+  }
+
+  // 屏幕物理像素：3D(SBS) 一般需要电脑输出 3840×1080，这个页面没法替你改系统分辨率
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(screen.width * dpr), h = Math.round(screen.height * dpr);
+  const ok3d = (w === 3840 && h === 1080);
+  info.textContent = `${activeProfile.label} · 屏幕 ${w}×${h}` +
+    (glassesMode === '3d' ? (ok3d ? ' ✓' : ' ⚠ 3D 一般需要 3840×1080') : '');
+  info.className = (glassesMode === '3d' && !ok3d) ? 'warn' : '';
+}
+
 async function connectHid() {
   if (!('hid' in navigator)) {
     alert('WebHID not supported. Use desktop Chrome/Edge over https:// or http://localhost.');
@@ -538,6 +700,15 @@ async function connectHid() {
     lastSampleTime = null;
 
     switchMode('hid');
+
+    // 按 vendorId/productId 识别型号，只有识别出来的型号才会自动发命令
+    activeProfile = detectGlassesProfile(hidDevice);
+    glassesMode = null;
+    updateGlassesUI();
+    if (activeProfile) {
+      // 不 await：sendReport 偶尔较慢，别卡住画面
+      sendGlassesCommand(activeProfile.cmd.enableInput);
+    }
   } catch (err) {
     console.error(err);
     message.innerText = "HID connect failed: " + err.message;
@@ -545,18 +716,27 @@ async function connectHid() {
 }
 
 async function disconnectHid() {
+  const stopCmd = activeProfile ? activeProfile.cmd.stop : null;
   if (hidDevice) {
+    if (stopCmd) await sendGlassesCommand(stopCmd);   // 停止命令（该型号已知时才发；见上方 profile 表）
     hidDevice.removeEventListener('inputreport', handleHidInputReport);
     try { await hidDevice.close(); } catch (e) {}
     hidDevice = null;
   }
+  activeProfile = null;
+  glassesMode = null;
+  updateGlassesUI();
+  setSbsUiSplit(false);   // 断开时保险起见恢复单份工具栏
   document.getElementById('connectHid').disabled = false;
   document.getElementById('disconnectHid').disabled = true;
   switchMode('phone');
+  if (!stopCmd) message.innerText = 'HID closed — glasses keep streaming IMU until USB is replugged';
 }
 
 function parseReport(bytes) {
   if (bytes.length < 48) return null;
+  // RayNeo：IMU 帧头 99 65；99 开头但类型不是 65 的是命令应答/状态帧（如 99 C8 设备信息），不能当 IMU 解析
+  if (bytes[0] === 0x99 && bytes[1] !== 0x65) return null;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return {
     ax: dv.getFloat32(4, true),
@@ -618,6 +798,9 @@ function applyUiVisibility() {
   toolbar.style.display = uiVisible ? 'flex' : 'none';
   video.style.display   = (uiVisible && videoLoaded) ? 'block' : 'none';
   message.style.display = uiVisible ? 'block' : 'none';
+  // 镜像跟随隐藏；显示时是否可见仍由 sbs-ui-split（是否 3D）决定，交给 CSS 处理
+  toolbarMirror.style.display = uiVisible ? '' : 'none';
+  messageMirror.style.display = uiVisible ? '' : 'none';
 }
 
 function bindUiToggle() {
@@ -625,6 +808,11 @@ function bindUiToggle() {
   renderer.domElement.addEventListener('click', () => {
     uiVisible = !uiVisible;
     applyUiVisibility();
+  });
+  // 右键 = 重新居中（等价于点 Center 按钮），并阻止浏览器自带的右键菜单弹出
+  renderer.domElement.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    centerView();
   });
 }
 
@@ -692,16 +880,56 @@ function createDefaultTexture() {
    phi 取 [π, 2π]：u=0 → +X(右)，u=0.5 → -Z(正前方)，u=1 → -X(左)
    从球内往外看，u 增大的方向是向左，所以取 1-u 抵消镜像。
    左眼取纹理左半 [0, 0.5]，右眼取纹理右半 [0.5, 1]。
+
+   投影形状（projectionAngle，0°~360°，默认 180°）：
+   - 180°：跟原来完全一样的半球，不做任何改动。
+   - 180°~360°：水平方向的包裹角度真的从 180° 撑大到 360°（整球），
+     垂直方向的 180° 顶到底不变——这是标准的"180 视频铺到整球"效果。
+   - 0°~180°：按每个顶点在"纯平面"和"180° 半球"之间线性插值，180° 时
+     权重 100% 落在半球公式上，跟原来的效果逐字节一致；越往 0° 拉，
+     画面越接近一块立在正前方的平面。内容用的还是半球自身生成的 uv
+     反推平面位置，所以不会因为这个插值而采样错位。
    ============================================================ */
+function buildProjectionGeometry(angleDeg) {
+  const R = 500;
+  const a = THREE.MathUtils.clamp(angleDeg, 0, 360);
+
+  if (a >= 180) {
+    // 180°→360°：垂直始终是完整的 π（顶到底），水平角度线性撑大到整球
+    const phiLength = THREE.MathUtils.degToRad(a);
+    const phiStart  = 1.5 * Math.PI - phiLength / 2;   // 内容中心始终对着 -Z（正前方）
+    return new THREE.SphereGeometry(R, 64, 32, phiStart, phiLength, 0, Math.PI);
+  }
+
+  // 0°→180°：在"纯平面"与"180° 半球"之间做逐顶点插值
+  const geo = new THREE.SphereGeometry(R, 64, 32, Math.PI, Math.PI, 0, Math.PI); // 半球，跟原版一模一样
+  const t = a / 180;   // 0 = 纯平面，1 = 半球（等于原版效果）
+  const pos = geo.attributes.position;
+  const uv  = geo.attributes.uv;   // 半球自身生成的 uv（还没做左右眼重映射），用它反推平面位置
+  const HALF_W = 500, HALF_H = 500, FLAT_Z = -500;   // 纯平面时的宽/高/距离，量级与半球(R=500)一致
+  for (let i = 0; i < pos.count; i++) {
+    const u = uv.getX(i), v = uv.getY(i);
+    // 注意：这两行的符号是照着半球自身在 u/v 端点处的真实 x/y 数值反推出来的，
+    // 不是随手写的对称公式——直接写 (u-0.5) 之类直觉上"对称"的式子，符号会刚好反过来，
+    // 插值中途所有顶点会先收缩过原点再展开，画面会自相交出蝴蝶结状的花纹。
+    const flatX = (0.5 - u) * 2 * HALF_W;
+    const flatY = (v - 0.5) * 2 * HALF_H;
+    const sx = pos.getX(i), sy = pos.getY(i), sz = pos.getZ(i);
+    pos.setXYZ(i,
+      flatX + (sx - flatX) * t,
+      flatY + (sy - flatY) * t,
+      FLAT_Z + (sz - FLAT_Z) * t
+    );
+  }
+  pos.needsUpdate = true;
+  return geo;
+}
+
 function buildScene(texture) {
   while (sceneL.children.length) sceneL.remove(sceneL.children[0]);
   while (sceneR.children.length) sceneR.remove(sceneR.children[0]);
 
-  const geometry = new THREE.SphereGeometry(
-    500, 64, 32,
-    Math.PI, Math.PI,   // phiStart = π → 半球中心在 -Z（相机正前方）
-    0, Math.PI
-  );
+  const geometry = buildProjectionGeometry(projectionAngle);
 
   const geoL = geometry.clone();
   const geoR = geometry.clone();
@@ -726,6 +954,30 @@ function buildScene(texture) {
 }
 
 /* ============================================================
+   11.5 按视频真实帧率更新纹理（缓解大视频卡顿）
+   ------------------------------------------------------------
+   原来的写法是不管视频是 24fps 还是 60fps，只要浏览器刷新（可能 90Hz/120Hz），
+   每次 rAF 都把 texture.needsUpdate 置 true，等于把同一帧反复传上 GPU，
+   分辨率越大这笔重复上传的开销越明显，是大视频卡顿的一个常见原因。
+   有 requestVideoFrameCallback 的浏览器（Chrome/Edge，以及较新版本的
+   Safari/Firefox）会在真正解码出新一帧时才把 videoTextureNeedsUpdate 置 true；
+   不支持的浏览器自动退回原来"每帧都传"的老逻辑，行为不会变差。
+   ============================================================ */
+let videoTextureNeedsUpdate = true;
+let usingRVFC = false;
+
+function attachVideoFrameCallback(vid) {
+  usingRVFC = typeof vid.requestVideoFrameCallback === 'function';
+  if (!usingRVFC) return;   // 不支持就什么都不做，animate() 里继续走老逻辑
+  videoTextureNeedsUpdate = false;
+  const onFrame = () => {
+    videoTextureNeedsUpdate = true;
+    vid.requestVideoFrameCallback(onFrame);
+  };
+  vid.requestVideoFrameCallback(onFrame);
+}
+
+/* ============================================================
    12. 渲染循环
    ============================================================ */
 function animate() {
@@ -746,7 +998,10 @@ function animate() {
   cameraL.lookAt(lookAt);
   cameraR.lookAt(lookAt);
 
-  if (texture && texture.isVideoTexture) texture.needsUpdate = true;
+  if (texture && texture.isVideoTexture && videoTextureNeedsUpdate) {
+    texture.needsUpdate = true;
+    if (usingRVFC) videoTextureNeedsUpdate = false;   // 这一帧已经传过了，等下一次回调再传
+  }
 
   const w = window.innerWidth, h = window.innerHeight;
 
